@@ -3,8 +3,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.bellszhu.elasticsearch</groupId>
-    <artifactId>elasticsearch-analysis-dynamic-synonym</artifactId>
-    <version>7.16.3</version>
+    <artifactId>dynamic-synonym-elasticsearch</artifactId>
+    <version>7.17.5</version>
     <packaging>jar</packaging>
     <name>elasticsearch-dynamic-synonym</name>
     <description>Analysis-plugin for synonym</description>

@@ -12,6 +12,7 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.text.ParseException;
 
+import org.apache.http.Header;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
@@ -128,42 +129,35 @@ public class RemoteSynonymFile implements SynonymFile {
      */
     public Reader getReader() {
         Reader reader;
-        RequestConfig rc = RequestConfig.custom()
+        HttpGet get = new HttpGet(location);
+        get.setConfig(RequestConfig.custom()
                 .setConnectionRequestTimeout(10 * 1000)
                 .setConnectTimeout(10 * 1000).setSocketTimeout(60 * 1000)
-                .build();
-        CloseableHttpResponse response = null;
+                .build());
         BufferedReader br = null;
-        HttpGet get = new HttpGet(location);
-        get.setConfig(rc);
+        CloseableHttpResponse response = null;
         try {
             response = executeHttpRequest(get);
             if (response.getStatusLine().getStatusCode() == 200) {
                 String charset = "UTF-8"; // 获取编码，默认为utf-8
-                if (response.getEntity().getContentType().getValue()
-                        .contains("charset=")) {
-                    String contentType = response.getEntity().getContentType()
-                            .getValue();
-                    charset = contentType.substring(contentType
-                            .lastIndexOf('=') + 1);
+                if (response.getEntity().getContentType().getValue().contains("charset=")) {
+                    String contentType = response.getEntity().getContentType().getValue();
+                    charset = contentType.substring(contentType.lastIndexOf('=') + 1);
                 }
 
-                br = new BufferedReader(new InputStreamReader(response
-                        .getEntity().getContent(), charset));
+                br = new BufferedReader(new InputStreamReader(response.getEntity().getContent(), charset));
                 StringBuilder sb = new StringBuilder();
                 String line;
                 while ((line = br.readLine()) != null) {
                     logger.debug("reload remote synonym: {}", line);
-                    sb.append(line)
-                            .append(System.getProperty("line.separator"));
+                    sb.append(line).append(System.getProperty("line.separator"));
                 }
                 reader = new StringReader(sb.toString());
-            } else reader = new StringReader("");
+            } else {
+                reader = new StringReader("");
+            }
         } catch (Exception e) {
             logger.error("get remote synonym reader {} error!", location, e);
-//            throw new IllegalArgumentException(
-//                    "Exception while reading remote synonyms file", e);
-            // Fix #54 Returns blank if synonym file has be deleted.
             reader = new StringReader("");
         } finally {
             try {
@@ -186,13 +180,11 @@ public class RemoteSynonymFile implements SynonymFile {
 
     @Override
     public boolean isNeedReloadSynonymMap() {
-        RequestConfig rc = RequestConfig.custom()
+        HttpHead head = AccessController.doPrivileged((PrivilegedAction<HttpHead>) () -> new HttpHead(location));
+        head.setConfig(RequestConfig.custom()
                 .setConnectionRequestTimeout(10 * 1000)
                 .setConnectTimeout(10 * 1000).setSocketTimeout(15 * 1000)
-                .build();
-        HttpHead head = AccessController.doPrivileged((PrivilegedAction<HttpHead>) () -> new HttpHead(location));
-        head.setConfig(rc);
-
+                .build());
         // 设置请求头
         if (lastModified != null) {
             head.setHeader("If-Modified-Since", lastModified);
@@ -200,28 +192,22 @@ public class RemoteSynonymFile implements SynonymFile {
         if (eTags != null) {
             head.setHeader("If-None-Match", eTags);
         }
-
+        boolean isReload = false;
         CloseableHttpResponse response = null;
         try {
             response = executeHttpRequest(head);
             if (response.getStatusLine().getStatusCode() == 200) { // 返回200 才做操作
-                if (!response.getLastHeader(LAST_MODIFIED_HEADER).getValue()
-                        .equalsIgnoreCase(lastModified)
-                        || !response.getLastHeader(ETAG_HEADER).getValue()
-                        .equalsIgnoreCase(eTags)) {
-
-                    lastModified = response.getLastHeader(LAST_MODIFIED_HEADER) == null ? null
-                            : response.getLastHeader(LAST_MODIFIED_HEADER)
-                            .getValue();
-                    eTags = response.getLastHeader(ETAG_HEADER) == null ? null
-                            : response.getLastHeader(ETAG_HEADER).getValue();
-                    return true;
+                Header eTag = response.getLastHeader(ETAG_HEADER);
+                Header lastModified = response.getLastHeader(LAST_MODIFIED_HEADER);
+                if (eTag == null || lastModified == null) {
+                    isReload = true;
+                } else if (!lastModified.getValue().equalsIgnoreCase(this.lastModified) || !eTag.getValue().equalsIgnoreCase(eTags)) {
+                    this.lastModified = lastModified.getValue();
+                    this.eTags = eTag.getValue();
+                    isReload = true;
                 }
-            } else if (response.getStatusLine().getStatusCode() == 304) {
-                return false;
             } else {
-                logger.info("remote synonym {} return bad code {}", location,
-                        response.getStatusLine().getStatusCode());
+                logger.info("remote synonym {} return bad code {}", location, response.getStatusLine().getStatusCode());
             }
         } finally {
             try {
@@ -232,6 +218,31 @@ public class RemoteSynonymFile implements SynonymFile {
                 logger.error("failed to close http response", e);
             }
         }
-        return false;
+        sendCallback(isReload);
+        return isReload;
+    }
+
+    private void sendCallback(boolean isReload) {
+        HttpHead head = AccessController.doPrivileged((PrivilegedAction<HttpHead>) () -> new HttpHead(location + "/callback"));
+        head.setConfig(RequestConfig.custom()
+                .setConnectionRequestTimeout(10 * 1000)
+                .setConnectTimeout(10 * 1000).setSocketTimeout(15 * 1000)
+                .build());
+        head.setHeader("isReload", String.valueOf(isReload));
+        CloseableHttpResponse response = null;
+        try {
+            response = executeHttpRequest(head);
+            if (response.getStatusLine().getStatusCode() != 200) {
+                logger.warn("callback return bad code {}", response.getStatusLine().getStatusCode());
+            }
+        } finally {
+            try {
+                if (response != null) {
+                    response.close();
+                }
+            } catch (IOException e) {
+                logger.error("failed to close http response", e);
+            }
+        }
     }
 }

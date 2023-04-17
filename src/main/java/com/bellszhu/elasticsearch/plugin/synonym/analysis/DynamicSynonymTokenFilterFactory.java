@@ -1,7 +1,15 @@
 package com.bellszhu.elasticsearch.plugin.synonym.analysis;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.synonym.SynonymMap;
+import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.env.Environment;
+import org.elasticsearch.index.IndexSettings;
+import org.elasticsearch.index.analysis.*;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -12,28 +20,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.synonym.SynonymMap;
-import org.elasticsearch.common.logging.DeprecationCategory;
-import org.elasticsearch.common.logging.DeprecationLogger;
-import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.env.Environment;
-import org.elasticsearch.index.IndexSettings;
-import org.elasticsearch.index.analysis.AbstractTokenFilterFactory;
-import org.elasticsearch.index.analysis.AnalysisMode;
-import org.elasticsearch.index.analysis.CharFilterFactory;
-import org.elasticsearch.index.analysis.CustomAnalyzer;
-import org.elasticsearch.index.analysis.TokenFilterFactory;
-import org.elasticsearch.index.analysis.TokenizerFactory;
-
 /**
  * @author bellszhu
  */
-public class DynamicSynonymTokenFilterFactory extends
-        AbstractTokenFilterFactory {
+public class DynamicSynonymTokenFilterFactory extends AbstractTokenFilterFactory {
 
     private static final Logger logger = LogManager.getLogger("dynamic-synonym");
 
@@ -58,18 +48,12 @@ public class DynamicSynonymTokenFilterFactory extends
     protected final Environment environment;
     protected final AnalysisMode analysisMode;
 
-    public DynamicSynonymTokenFilterFactory(
-            IndexSettings indexSettings,
-            Environment env,
-            String name,
-            Settings settings
-    ) throws IOException {
+    public DynamicSynonymTokenFilterFactory(IndexSettings indexSettings, Environment env, String name, Settings settings) {
         super(indexSettings, name, settings);
 
         this.location = settings.get("synonyms_path");
         if (this.location == null) {
-            throw new IllegalArgumentException(
-                    "dynamic synonym requires `synonyms_path` to be configured");
+            throw new IllegalArgumentException("dynamic synonym requires `synonyms_path` to be configured");
         }
         if (settings.get("ignore_case") != null) {
         }
@@ -78,8 +62,8 @@ public class DynamicSynonymTokenFilterFactory extends
         this.expand = settings.getAsBoolean("expand", true);
         this.lenient = settings.getAsBoolean("lenient", false);
         this.format = settings.get("format", "");
-        boolean updateable = settings.getAsBoolean("updateable", false);
-        this.analysisMode = updateable ? AnalysisMode.SEARCH_TIME : AnalysisMode.ALL;
+//        settings.getAsBoolean("updateable", false) ? AnalysisMode.SEARCH_TIME :
+        this.analysisMode = AnalysisMode.ALL;
         this.environment = env;
     }
 
@@ -163,15 +147,12 @@ public class DynamicSynonymTokenFilterFactory extends
         try {
             SynonymFile synonymFile;
             if (location.startsWith("http://") || location.startsWith("https://")) {
-                synonymFile = new RemoteSynonymFile(
-                        environment, analyzer, expand, lenient,  format, location);
+                synonymFile = new RemoteSynonymFile(environment, analyzer, expand, lenient, format, location);
             } else {
-                synonymFile = new LocalSynonymFile(
-                        environment, analyzer, expand, lenient, format, location);
+                synonymFile = new LocalSynonymFile(environment, analyzer, expand, lenient, format, location);
             }
             if (scheduledFuture == null) {
-                scheduledFuture = pool.scheduleAtFixedRate(new Monitor(synonymFile),
-                                interval, interval, TimeUnit.SECONDS);
+                scheduledFuture = pool.scheduleAtFixedRate(new Monitor(synonymFile), interval, interval, TimeUnit.SECONDS);
             }
             return synonymFile;
         } catch (Exception e) {
@@ -182,7 +163,7 @@ public class DynamicSynonymTokenFilterFactory extends
 
     public class Monitor implements Runnable {
 
-        private SynonymFile synonymFile;
+        private final SynonymFile synonymFile;
 
         Monitor(SynonymFile synonymFile) {
             this.synonymFile = synonymFile;
