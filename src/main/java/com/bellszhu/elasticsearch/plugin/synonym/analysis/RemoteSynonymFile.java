@@ -38,35 +38,40 @@ public class RemoteSynonymFile implements SynonymFile {
 
     private static final Logger logger = LogManager.getLogger("dynamic-synonym");
 
-    private CloseableHttpClient httpclient;
+    private final CloseableHttpClient httpclient;
 
-    private String format;
+    private final String format;
 
-    private boolean expand;
+    private final boolean expand;
 
-    private boolean lenient;
+    private final boolean lenient;
 
-    private Analyzer analyzer;
+    private final Analyzer analyzer;
 
-    private Environment env;
+    private final Environment env;
 
     /**
      * Remote URL address
      */
-    private String location;
+    private final String location;
+
+    private final boolean multiple_files;
 
     private String lastModified;
 
     private String eTags;
 
-    RemoteSynonymFile(Environment env, Analyzer analyzer,
-                      boolean expand, boolean lenient, String format, String location) {
+    RemoteSynonymFile(
+            Environment env, Analyzer analyzer, boolean expand, boolean lenient,
+            String format, String location, boolean multiple_files
+    ) {
         this.analyzer = analyzer;
         this.expand = expand;
         this.lenient = lenient;
         this.format = format;
         this.env = env;
         this.location = location;
+        this.multiple_files = multiple_files;
 
         this.httpclient = AccessController.doPrivileged((PrivilegedAction<CloseableHttpClient>) HttpClients::createDefault);
 
@@ -93,9 +98,7 @@ public class RemoteSynonymFile implements SynonymFile {
         try {
             logger.debug("start reload remote synonym from {}.", location);
             rulesReader = getReader();
-            SynonymMap.Builder parser;
-
-            parser = getSynonymParser(rulesReader, format, expand, lenient, analyzer);
+            SynonymMap.Builder parser = getSynonymParser(rulesReader, format, expand, lenient, analyzer);
             return parser.build();
         } catch (Exception e) {
             logger.error("reload remote synonym {} error!", location, e);
