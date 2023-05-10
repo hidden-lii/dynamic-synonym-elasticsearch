@@ -26,6 +26,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -65,7 +66,7 @@ public class DynamicSynonymPluginTest {
                 "            \"type\": \"" + synonymType + "\",\n" +
                 "            \"synonyms_path\": \"" + localPath + "\",\n" +
                 "            \"interval\": \"10\"\n" +
-                "        }"+
+                "        }" +
                 "      },\n" +
                 "      \"char_filter\":{\n" +
                 "        \"my_char_filter\":{\n" +
@@ -101,9 +102,11 @@ public class DynamicSynonymPluginTest {
                 "      \"filter\":{\n" +
                 "        \"remote_synonym\": {\n" +
                 "            \"type\": \"dynamic_synonym\",\n" +
-                "            \"synonyms_path\": \"http://tasearch.uat.qa.nt.ctripcorp.com/ta/synonym/synonyms.txt\",\n" +
-                "            \"interval\": \"10\"\n" +
-                "        }"+
+                "            \"synonyms_path\": \"http://tasearch.uat.qa.nt.ctripcorp.com/ta/synonym/incremental/synonyms.txt\",\n" +
+                "            \"interval\": \"2\",\n" +
+                "            \"callback\": \"true\",\n" +
+                "            \"incrementable\": \"true\"\n" +
+                "        }" +
                 "      },\n" +
                 "      \"char_filter\":{\n" +
                 "        \"my_char_filter\":{\n" +
@@ -133,29 +136,37 @@ public class DynamicSynonymPluginTest {
     }
 
     private synchronized void analyzer(String indexName) throws InterruptedException {
-        List<AnalyzeAction.AnalyzeToken> tokens = tokens(indexName, "普陀山");
-        for (AnalyzeAction.AnalyzeToken token : tokens) {
-            System.out.println(token.getTerm() + " => " + token.getType());
-        }
+
+        List<AnalyzeAction.AnalyzeToken> tokens = tokens(indexName, "上海迪士尼度假区");
+        System.out.println("上海迪士尼度假区 => " + Arrays.toString(tokens.stream().map(AnalyzeAction.AnalyzeToken::getTerm).toArray()));
+
+        tokens = tokens(indexName, "迪士尼");
+        System.out.println("迪士尼 => " + Arrays.toString(tokens.stream().map(AnalyzeAction.AnalyzeToken::getTerm).toArray()));
 
         /*
         Wait one minute to modify the synonym file and run again.
          */
-        wait(1000 * 10);
+//        wait(1000 * 2);
 
-        tokens = tokens(indexName, "普陀山");
-        for (AnalyzeAction.AnalyzeToken token : tokens) {
-            System.out.println(token.getTerm() + " => " + token.getType());
-        }
-
-        for (int i = 0; i < 10; i++) {
-            wait(1000 * 10);
-            tokens = tokens(indexName, "普陀山");
-            for (AnalyzeAction.AnalyzeToken token : tokens) {
-                System.out.println(token.getTerm() + " => " + token.getType());
-            }
-        }
+//        tokens = tokens(indexName, "上海迪士尼度假区");
+//        System.out.println("上海迪士尼度假区 => " + Arrays.toString(tokens.stream().map(AnalyzeAction.AnalyzeToken::getTerm).toArray()));
 //
+//        tokens = tokens(indexName, "北京环球度假区");
+//        System.out.println("北京环球度假区 => " + Arrays.toString(tokens.stream().map(AnalyzeAction.AnalyzeToken::getTerm).toArray()));
+//
+        for (int i = 0; i < 10; i++) {
+            wait(1000 * 3);
+
+            tokens = tokens(indexName, "上海迪士尼度假区");
+            System.out.println("上海迪士尼度假区 => " + Arrays.toString(tokens.stream().map(AnalyzeAction.AnalyzeToken::getTerm).toArray()));
+
+            tokens = tokens(indexName, "迪士尼");
+            System.out.println("迪士尼 => " + Arrays.toString(tokens.stream().map(AnalyzeAction.AnalyzeToken::getTerm).toArray()));
+//
+//            tokens = tokens(indexName, "北京环球度假区");
+//            System.out.println("北京环球度假区 => " + Arrays.toString(tokens.stream().map(AnalyzeAction.AnalyzeToken::getTerm).toArray()));
+        }
+
 //        tokens = tokens(indexName, "america");
 //        for (AnalyzeAction.AnalyzeToken token : tokens) {
 //            System.out.println(token.getTerm() + " => " + token.getType());

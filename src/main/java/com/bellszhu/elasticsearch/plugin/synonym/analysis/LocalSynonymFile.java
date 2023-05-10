@@ -60,7 +60,7 @@ public class LocalSynonymFile implements SynonymFile {
     }
 
     @Override
-    public SynonymMap reloadSynonymMap() {
+    public SynonymMap reloadSynonymMap(SynonymMap now) {
         try {
             logger.debug("start reload local synonym from {}.", synonymFilePath);
             Reader rulesReader = getReader();

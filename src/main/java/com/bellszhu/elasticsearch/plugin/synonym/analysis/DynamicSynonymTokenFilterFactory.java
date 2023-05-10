@@ -5,8 +5,6 @@ import org.apache.logging.log4j.Logger;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.synonym.SynonymMap;
-import org.apache.lucene.util.*;
-import org.apache.lucene.util.fst.*;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.index.IndexSettings;
@@ -20,6 +18,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 /**
@@ -45,9 +44,11 @@ public class DynamicSynonymTokenFilterFactory extends AbstractTokenFilterFactory
     private final boolean lenient;
     private final String format;
     private final int interval;
+    private final boolean callback;
     private final boolean multiple_files;
     private final boolean incrementable;
-    protected SynonymMap synonymMap;
+    protected volatile SynonymMap synonymMap;
+    protected volatile AtomicReference<SynonymMap> synonymMapRef = new AtomicReference<>();
     protected Map<AbsSynonymFilter, Integer> dynamicSynonymFilters = new WeakHashMap<>();
     protected final Environment environment;
     protected final AnalysisMode analysisMode;
@@ -65,10 +66,11 @@ public class DynamicSynonymTokenFilterFactory extends AbstractTokenFilterFactory
         this.interval = settings.getAsInt("interval", 60);
         this.expand = settings.getAsBoolean("expand", true);
         this.lenient = settings.getAsBoolean("lenient", false);
-        // 开启多查询模式,根据header中的offset分多次查询
+        // TODO 开启多查询模式,根据header中的offset分多次查询
         this.multiple_files = settings.getAsBoolean("multiple_files", false);
         // 开启增量更新模式
         this.incrementable = settings.getAsBoolean("incrementable", false);
+        this.callback = settings.getAsBoolean("callback", false);
         this.format = settings.get("format", "");
 //        settings.getAsBoolean("updateable", false) ? AnalysisMode.SEARCH_TIME :
         this.analysisMode = AnalysisMode.ALL;
@@ -144,30 +146,7 @@ public class DynamicSynonymTokenFilterFactory extends AbstractTokenFilterFactory
 
     SynonymMap buildSynonyms(Analyzer analyzer) {
         try {
-            SynonymMap currentMap = getSynonymFile(analyzer).reloadSynonymMap();
-            if (synonymMap == null || !incrementable) {
-                return currentMap;
-            }
-            // 增量同步
-            BytesRefHash mergedWords = new BytesRefHash();
-            for (int i = 0; i < synonymMap.words.size(); ++i) {
-                BytesRef word = synonymMap.words.get(i, new BytesRef());
-                mergedWords.add(word);
-            }
-            for (int i = 0; i < currentMap.words.size(); ++i) {
-                BytesRef word = currentMap.words.get(i, new BytesRef());
-                mergedWords.add(word);
-            }
-
-            Outputs<BytesRef> outputs = ByteSequenceOutputs.getSingleton();
-            Builder<BytesRef> builder = new Builder<>(FST.INPUT_TYPE.BYTE4, outputs);
-            for (int i = 0; i < mergedWords.size(); ++i) {
-                BytesRef word = mergedWords.get(i, new BytesRef());
-                builder.add(Util.toIntsRef(word, new IntsRefBuilder()), outputs.getNoOutput());
-            }
-
-            int fixedMaxHorizontalContext = Math.max(synonymMap.maxHorizontalContext, currentMap.maxHorizontalContext);
-            return new SynonymMap(builder.finish(), mergedWords, fixedMaxHorizontalContext);
+            return getSynonymFile(analyzer).reloadSynonymMap(synonymMap);
         } catch (Exception e) {
             logger.error("failed to build synonyms", e);
             throw new IllegalArgumentException("failed to build synonyms", e);
@@ -178,7 +157,7 @@ public class DynamicSynonymTokenFilterFactory extends AbstractTokenFilterFactory
         try {
             SynonymFile synonymFile;
             if (location.startsWith("http://") || location.startsWith("https://")) {
-                synonymFile = new RemoteSynonymFile(environment, analyzer, expand, lenient, format, location, multiple_files);
+                synonymFile = new RemoteSynonymFile(environment, analyzer, expand, lenient, format, location, multiple_files, callback, incrementable);
             } else {
                 synonymFile = new LocalSynonymFile(environment, analyzer, expand, lenient, format, location);
             }
@@ -203,7 +182,8 @@ public class DynamicSynonymTokenFilterFactory extends AbstractTokenFilterFactory
         @Override
         public void run() {
             if (synonymFile.isNeedReloadSynonymMap()) {
-                synonymMap = synonymFile.reloadSynonymMap();
+                synonymMapRef.set(synonymMap);
+                synonymMap = synonymFile.reloadSynonymMap(synonymMapRef.get());
                 for (AbsSynonymFilter dynamicSynonymFilter : dynamicSynonymFilters.keySet()) {
                     dynamicSynonymFilter.update(synonymMap);
                     logger.debug("success reload synonym");
